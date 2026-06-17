@@ -2,6 +2,7 @@
 import os
 import json
 import requests
+import time
 from datetime import datetime, timezone, timedelta
 
 # ========================
@@ -11,6 +12,7 @@ WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL") or "<COLE_AQUI_SEU_WEBHOOK>"
 API_URL = "https://ll.thespacedevs.com/2.0.0/launch/upcoming/?search=starship&ordering=net&limit=20"
 SENT_FILE = "sent_launches.json"
 WINDOW_DAYS = 7  # Quantos dias à frente considerar para publicação
+CHECK_INTERVAL = 3600  # Intervalo entre verificações em segundos (1 hora)
 DIAS_PT = [
     "Segunda-feira",
     "Terça-feira",
@@ -75,13 +77,14 @@ def clean_sent(sent):
         del sent[launch_id]
     return sent
 
+
 def send_to_discord(embed):
     if "<COLE_AQUI_SEU_WEBHOOK>" in WEBHOOK_URL:
         print(
             "⚠️ Configure seu webhook no topo do script ou na variável de ambiente DISCORD_WEBHOOK_URL"
         )
         return
-    payload = {"username": "Rocket Bot","embeds": [embed]}
+    payload = {"username": "Rocket Bot", "embeds": [embed]}
     r = requests.post(WEBHOOK_URL, json=payload)
     if r.status_code >= 300:
         print("Erro ao enviar ao Discord:", r.text)
@@ -198,4 +201,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    print("🤖 Rocket Bot iniciado. Verificando a cada 1 hora...")
+    while True:
+        print(f"🔍 Verificando lançamentos... {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M UTC')}")
+        main()
+        print(f"💤 Aguardando {CHECK_INTERVAL // 60} minutos para a próxima verificação...")
+        time.sleep(CHECK_INTERVAL)
