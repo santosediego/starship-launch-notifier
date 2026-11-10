@@ -10,7 +10,7 @@ from datetime import datetime, timezone, timedelta
 # ========================
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL") or "<COLE_AQUI_SEU_WEBHOOK>"
 API_URL = "https://ll.thespacedevs.com/2.0.0/launch/upcoming/?search=starship&ordering=net&limit=20"
-SENT_FILE = "sent_launches.json"
+SENT_FILE = os.getenv("SENT_FILE", "sent_launches.json")
 WINDOW_DAYS = 7  # Quantos dias à frente considerar para publicação
 CHECK_INTERVAL = 3600  # Intervalo entre verificações em segundos (1 hora)
 DIAS_PT = [
@@ -80,36 +80,39 @@ def clean_sent(sent):
 
 def send_to_discord(embed):
     if "<COLE_AQUI_SEU_WEBHOOK>" in WEBHOOK_URL:
-        print(
-            "⚠️ Configure seu webhook no topo do script ou na variável de ambiente DISCORD_WEBHOOK_URL"
-        )
-        return
+        print("⚠️ Configure seu webhook no topo do script ou na variável de ambiente DISCORD_WEBHOOK_URL")
+        return False
     payload = {"username": "Rocket Bot", "embeds": [embed]}
-    r = requests.post(WEBHOOK_URL, json=payload)
+    try:
+        r = requests.post(WEBHOOK_URL, json=payload, timeout=10)
+    except requests.RequestException as e:
+        print("Erro de rede ao enviar ao Discord:", e)
+        return False
     if r.status_code >= 300:
         print("Erro ao enviar ao Discord:", r.text)
-    else:
-        print("✅ Mensagem enviada com sucesso.")
+        return False
+    print("✅ Mensagem enviada com sucesso.")
+    return True
 
 
 def format_launch_embed(launch, update=False):
     """Formata os dados do lançamento em um embed do Discord"""
     name = launch.get("name", "Sem nome")
     net = iso_to_local(launch.get("net", ""))
-    pad = launch.get("pad", {}).get("location", {}).get("name", "Desconhecido")
-    status = launch.get("status", {}).get("name", "Desconhecido")
-    probability = launch.get("probability", "N/A")
+    pad = ((launch.get("pad") or {}).get("location") or {}).get("name") or "Desconhecido"
+    status = (launch.get("status") or {}).get("name") or "Desconhecido"
+    probability = launch.get("probability")
     rocket = (
         launch.get("rocket", {}).get("configuration", {}).get("name", "Desconhecido")
     )
 
     mission = launch.get("mission")
     if mission:
-        mission_name = mission.get("name", "Sem missão")
-        mission_desc = mission.get("description", "Sem descrição")
-        mission_type = mission.get("type", "Desconhecido")
-        orbit = mission.get("orbit", {})
-        orbit_name = orbit.get("name", "Desconhecido")
+        mission_name = mission.get("name") or "Sem missão"
+        mission_desc = mission.get("description") or "Sem descrição"
+        mission_type = mission.get("type") or "Desconhecido"
+        orbit = mission.get("orbit") or {}
+        orbit_name = orbit.get("name") or "Desconhecido"
         mission_info = (
             f"**{mission_name}**\n{mission_type} – {orbit_name}\n{mission_desc}"
         )
@@ -133,7 +136,7 @@ def format_launch_embed(launch, update=False):
             {"name": "📡 Status", "value": status, "inline": True},
             {
                 "name": "🎯 Probabilidade",
-                "value": f"{probability}%" if probability != "N/A" else "N/A",
+                "value": f"{probability}%" if probability is not None else "N/A",
                 "inline": True,
             },
             {"name": "🚀 Foguete", "value": rocket, "inline": True},
@@ -178,7 +181,7 @@ def main():
         if net_dt > now + timedelta(days=WINDOW_DAYS):
             continue
 
-        status = launch.get("status", {}).get("name", "Desconhecido")
+        status = (launch.get("status") or {}).get("name") or "Desconhecido"
         sent_info = sent.get(launch_id, {})
         sent_status = sent_info.get("status")
         sent_net = sent_info.get("net")
@@ -186,16 +189,15 @@ def main():
         # Envia lançamento novo confirmado
         if launch_id not in sent and status == "Go":
             embed = format_launch_embed(launch)
-            send_to_discord(embed)
-            sent[launch_id] = {"status": status, "net": net_iso}
-            print("🚀 Novo lançamento enviado:", launch.get("name"))
-
+            if send_to_discord(embed):
+                sent[launch_id] = {"status": status, "net": net_iso}
+                print("🚀 Novo lançamento enviado:", launch.get("name"))
         # Envia atualização se status ou data mudarem
         elif launch_id in sent and (sent_status != status or sent_net != net_iso):
             embed = format_launch_embed(launch, update=True)
-            send_to_discord(embed)
-            sent[launch_id] = {"status": status, "net": net_iso}
-            print("🔄 Atualização enviada:", launch.get("name"))
+            if send_to_discord(embed):
+                sent[launch_id] = {"status": status, "net": net_iso}
+                print("🔄 Atualização enviada:", launch.get("name"))
 
     save_sent(sent)
 
@@ -204,6 +206,9 @@ if __name__ == "__main__":
     print("🤖 Rocket Bot iniciado. Verificando a cada 1 hora...")
     while True:
         print(f"🔍 Verificando lançamentos... {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M UTC')}")
-        main()
+        try:
+            main()
+        except Exception as e:
+            print("Erro inesperado na verificação:", e)
         print(f"💤 Aguardando {CHECK_INTERVAL // 60} minutos para a próxima verificação...")
         time.sleep(CHECK_INTERVAL)
