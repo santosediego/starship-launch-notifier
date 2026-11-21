@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import os
 import json
+import signal
+import threading
 import requests
-import time
 from datetime import datetime, timezone, timedelta
 
 # ========================
@@ -32,6 +33,14 @@ STATUS_COLORS = {
     "TBD": 0x95A5A6,  # Cinza
     "Desconhecido": 0x7F8C8D,
 }
+
+# Sinalizador de parada: o handler de SIGTERM/SIGINT só liga isto,
+# e o laço principal percebe e encerra com calma.
+parar = threading.Event()
+
+
+def pedir_parada(signum, frame):
+    parar.set()
 
 # ========================
 # FUNÇÕES AUXILIARES
@@ -171,6 +180,9 @@ def main():
         return
 
     for launch in launches:
+        # Se pediram para parar, não começa um envio novo
+        if parar.is_set():
+            break
         launch_id = launch.get("id")
         net_iso = launch.get("net")
         if not net_iso:
@@ -191,6 +203,7 @@ def main():
             embed = format_launch_embed(launch)
             if send_to_discord(embed):
                 sent[launch_id] = {"status": status, "net": net_iso}
+                save_sent(sent)
                 print("🚀 Novo lançamento enviado:", launch.get("name"))
         # Envia atualização se status ou data mudarem
         elif launch_id in sent and (sent_status != status or sent_net != net_iso):
@@ -203,12 +216,22 @@ def main():
 
 
 if __name__ == "__main__":
-    print("🤖 Rocket Bot iniciado. Verificando a cada 1 hora...")
-    while True:
-        print(f"🔍 Verificando lançamentos... {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M UTC')}")
+    # O `docker stop` manda SIGTERM. Como o script roda como PID 1 no container,
+    # sem handler o Python ignora o sinal e o Docker acaba usando SIGKILL (exit 137).
+    signal.signal(signal.SIGTERM, pedir_parada)
+    signal.signal(signal.SIGINT, pedir_parada)
+
+    print("🤖 Rocket Bot iniciado. Verificando a cada 1 hora...", flush=True)
+    while not parar.is_set():
+        print(f"🔍 Verificando lançamentos... {datetime.now(timezone.utc).strftime('%d/%m/%Y %H:%M UTC')}", flush=True)
         try:
             main()
         except Exception as e:
             print("Erro inesperado na verificação:", e)
-        print(f"💤 Aguardando {CHECK_INTERVAL // 60} minutos para a próxima verificação...")
-        time.sleep(CHECK_INTERVAL)
+        if parar.is_set():
+            break
+        print(f"💤 Aguardando {CHECK_INTERVAL // 60} minutos para a próxima verificação...", flush=True)
+        # No lugar de time.sleep: dorme até 1 hora, mas acorda na hora se pedirem para parar
+        parar.wait(CHECK_INTERVAL)
+
+    print("🛑 Parada solicitada. Rocket Bot encerrado.", flush=True)
