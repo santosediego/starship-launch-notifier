@@ -210,6 +210,7 @@ def main():
             embed = format_launch_embed(launch, update=True)
             if send_to_discord(embed):
                 sent[launch_id] = {"status": status, "net": net_iso}
+                save_sent(sent)
                 print("🔄 Atualização enviada:", launch.get("name"))
 
     save_sent(sent)
