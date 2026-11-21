@@ -1,0 +1,16 @@
+services:
+  starship-launcher:
+    build: .
+    image: starship-launcher
+    container_name: starship-launcher
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 15s
+    env_file: .env
+    environment:
+      SENT_FILE: /data/sent_launches.json
+    volumes:
+      - starship-data:/data
+
+volumes:
+  starship-data:
