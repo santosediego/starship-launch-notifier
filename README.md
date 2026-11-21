@@ -8,7 +8,7 @@
 
 ## Sobre o projeto
 
-Bot simples que avisa em um canal do Discord quando um lançamento da **Starship** (SpaceX) é confirmado. Ele roda 24/7 em um container Docker e usa um **webhook** do Discord, então não precisa criar um bot nem dar permissões a ele.
+Bot simples que avisa em um canal do Discord quando um lançamento da **Starship** (SpaceX) é confirmado. Ele roda continuamente em um container Docker e usa um **webhook** do Discord, então não precisa criar um bot nem dar permissões a ele.
 
 Os dados vêm da [The Space Devs API](https://thespacedevs.com/ "The Space Devs").
 
@@ -24,11 +24,13 @@ Cada mensagem traz o horário já convertido para **Brasília**, o local, o stat
 
 Para não repetir avisos, o bot guarda os lançamentos já enviados em um pequeno arquivo (`sent_launches.json`). Se o Discord recusar o envio, o lançamento **não** é marcado como enviado, e ele tenta de novo na verificação seguinte.
 
+O bot trata o sinal de parada do Docker (`SIGTERM`): ao receber `docker stop`, ele termina a verificação em andamento e encerra, sem precisar ser morto à força.
+
 ## Tecnologias utilizadas
 
 - Python 3.12
 - Requests
-- Docker
+- Docker e Docker Compose
 - Webhook do Discord (embeds)
 - The Space Devs API (Launch Library 2)
 
@@ -41,9 +43,9 @@ Para não repetir avisos, o bot guarda os lançamentos já enviados em um pequen
 
 > A URL do webhook é uma **senha**: quem a tiver consegue postar no seu canal. Não a coloque no código nem no GitHub. Se vazar, apague o webhook e crie outro.
 
-### Com Docker (recomendado)
+### Com Docker Compose (recomendado)
 
-Pré-requisito: Docker.
+Pré-requisito: Docker com o plugin Compose.
 
 ```bash
 # clonar repositório
@@ -52,21 +54,33 @@ git clone https://github.com/santosediego/starship-launch-notifier.git
 # entrar na pasta do projeto
 cd starship-launch-notifier
 
-# construir a imagem
-docker build -t starship-launcher .
+# copiar o modelo e colocar o seu webhook
+cp .env.example .env
+nano .env
 ```
 
-Guarde o webhook em um arquivo **fora do projeto**, com uma linha só (sem aspas e sem espaços em volta do `=`):
-
-```bash
-nano ~/.env.discord
-```
+O `.env` deve ter uma linha só, sem aspas e sem espaços em volta do `=`:
 
 ```
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/SEU_ID/SEU_TOKEN
 ```
 
 ```bash
+chmod 600 .env
+
+# construir e subir em segundo plano
+docker compose up -d --build
+```
+
+O arquivo `.env` já está no `.gitignore`. O histórico de avisos fica num volume (`starship-data`) e sobrevive a atualizações e recriações do container.
+
+### Com `docker run` (alternativa)
+
+Construa a imagem e guarde o webhook em um arquivo **fora do projeto**, com uma linha só:
+
+```bash
+docker build -t starship-launcher .
+nano ~/.env.discord
 chmod 600 ~/.env.discord
 ```
 
@@ -94,15 +108,16 @@ Sem o volume, o bot funciona do mesmo jeito, mas, se você apagar e recriar o co
 
 ```bash
 # ver os logs (deve aparecer uma verificação por hora)
-docker logs -f starship-launcher
+docker compose logs -f        # ou: docker logs -f starship-launcher
 
 # ver o que já foi enviado
 docker exec starship-launcher cat /data/sent_launches.json
 
-# parar e remover o container
-docker stop starship-launcher
-docker rm starship-launcher
+# parar e remover o container (o histórico fica no volume)
+docker compose down           # ou: docker stop starship-launcher && docker rm starship-launcher
 ```
+
+> Cuidado: `docker compose down -v` também apaga o volume, e com ele o histórico de avisos.
 
 ### Sem Docker
 
@@ -128,9 +143,11 @@ curl -H "Content-Type: application/json" \
 
 ```
 starship-launch-notifier/
-├── launch_to_discord.py   # Código do bot
-├── requirements.txt       # Dependências Python
-├── Dockerfile             # Definição do container
+├── launch_to_discord.py
+├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+├── .env.example
 ├── README.md
 └── LICENSE
 ```
